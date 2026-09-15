@@ -170,7 +170,8 @@ model LedgerEntry {
   account     Account     @relation(fields: [accountId], references: [id], onDelete: Restrict)
 
   @@index([transactionId])
-  @@index([accountId, createdAt])
+  // Keyset pagination of history: WHERE account_id = ? AND id < ? ORDER BY id DESC.
+  @@index([accountId, id])
   @@map("ledger_entries")
 }
 

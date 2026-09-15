@@ -33,8 +33,8 @@ Users hold balances in several fiat currencies and cryptocurrencies. They can co
 ### Profile
 
 - Balances for every currency.
-- Transaction history.
-- **Deposit** and **Withdraw** options are shown in the profile but are **not functional**, because no payment provider (Stripe, etc.) is connected. They are UI placeholders only.
+- Transaction history with a currency filter and pagination.
+- **Deposit** and **Withdraw** options are shown in the profile but are **not functional**, because no payment provider (Stripe, etc.) is connected. The dialogs show the form, with submission disabled.
 
 ### Admin panel
 
@@ -139,12 +139,31 @@ Email and password auth built on the [Next.js authentication guide](https://next
 - **Redirect after login** accepts only local paths, which prevents open redirects (e.g. `?next=//evil.com`).
 - **CSRF**: Server Actions accept only `POST` requests from the same origin.
 
+## Performance: transaction history
+
+The history page lists a user's ledger entries across their accounts, newest first. It is paginated with a keyset cursor (`id < cursor`) rather than `OFFSET`, so deep pages cost the same as the first one.
+
+The first version used Prisma's generated query (`JOIN accounts … WHERE user_id = ? ORDER BY id DESC LIMIT 21`). On a benchmark database with **50,000 users and 2 million ledger entries**, `EXPLAIN ANALYZE` showed that PostgreSQL read **all** of a user's entries and sorted them to return 21 rows. Fine for a typical user, but the cost grows with the length of a user's history.
+
+The fix ([`src/server/history.ts`](src/server/history.ts)):
+
+1. Replace the `(account_id, created_at)` index with `(account_id, id)`.
+2. Use a `LATERAL` join: for each of the user's accounts, read at most one page from that index (an index scan backward that stops after 21 rows), then merge.
+
+| Query (user with 20,000 entries) | Before                   | After               |
+| -------------------------------- | ------------------------ | ------------------- |
+| First page                       | 21.8 ms, 1,719 buffers   | 0.05 ms, 31 buffers |
+| Page 500                         | 11.5 ms (`OFFSET 10000`) | 0.28 ms, 37 buffers |
+| Typical user (23 entries)        | 0.45 ms                  | 0.13 ms             |
+
+The work is now bounded by the page size and the number of the user's accounts, not by the history length. Paging through all 1,000 pages of that user returned the same entries in the same order as a plain full query.
+
 ## Roadmap
 
 - [x] Project setup: Next.js, TypeScript, Tailwind, Prisma, Docker Compose with Postgres
 - [x] Database schema, migrations, seed data (currencies, admin user)
 - [x] Authentication: registration and login, automatic account creation, $100 welcome bonus
-- [ ] Profile: balances, transaction history, Deposit/Withdraw placeholders
+- [x] Profile: balances, transaction history, Deposit/Withdraw placeholders
 - [ ] Exchange rates and conversion between own accounts
 - [ ] Transfers to other users
 - [ ] P2P marketplace: create, browse, buy and cancel lots
@@ -210,7 +229,7 @@ prisma/
 src/
   app/                 Next.js App Router pages, Server Actions and route handlers
     (auth)/            Sign-up, login and logout
-    profile/           User profile with balances
+    profile/           Balances, transaction history, deposit/withdraw dialogs
     api/health/        Health check endpoint
   components/          Shared React components
   lib/                 Code shared by server and client
@@ -219,12 +238,14 @@ src/
     env.ts             Validated environment variables
     money.ts           Precise amount formatting
     password.ts        Password hashing (scrypt)
+    transaction-types.ts  Display labels for transaction types
     validation/        Zod schemas for forms
   server/              Server-only business logic
     auth.ts            Sessions, current user
     ledger.ts          Posting transactions to the ledger
     users.ts           Registration and credential checks
     accounts.ts        Balances
+    history.ts         Transaction history (raw SQL, keyset pagination)
   proxy.ts             Optimistic redirect for protected pages
   generated/prisma/    Generated Prisma client (git-ignored)
 ```

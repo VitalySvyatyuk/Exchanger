@@ -7,6 +7,7 @@
   --border: #e4e4e7;
   --card: #fafafa;
   --danger: #dc2626;
+  --success: #15803d;
 }
 
 @theme inline {
@@ -16,6 +17,7 @@
   --color-border: var(--border);
   --color-card: var(--card);
   --color-danger: var(--danger);
+  --color-success: var(--success);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -28,6 +30,7 @@
     --border: #27272a;
     --card: #141414;
     --danger: #f87171;
+    --success: #4ade80;
   }
 }
 
