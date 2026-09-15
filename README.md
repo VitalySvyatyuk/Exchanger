@@ -19,7 +19,7 @@ Users hold balances in several fiat currencies and cryptocurrencies. They can co
 ### Transfers and conversion
 
 - **Convert between own accounts**: for example, USD → EUR at the current exchange rate, with a 0.5% fee and a live preview of the amount received.
-- **Send money to another user**, with optional conversion: for example, send USD from your account and the recipient receives EUR.
+- **Send money to another user** by email, with an optional note. The recipient can get a different currency: for example, send USD and the recipient receives EUR. Transfers in the same currency have no fee.
 - **Exchange rates** come from public APIs ([Frankfurter](https://frankfurter.dev) for fiat, [CoinGecko](https://www.coingecko.com/en/api) for crypto). They are cached in the database, so the app keeps working if an API is slow or unavailable.
 
 ### P2P marketplace (lots)
@@ -103,6 +103,8 @@ Examples:
 | ------------------------------ | ---------------------------------------------------------------------- |
 | Welcome bonus                  | User USD `+100`, Treasury USD `-100`                                   |
 | Convert 50 USD to 43 EUR       | User USD `-50`, Treasury USD `+50`, Treasury EUR `-43`, User EUR `+43` |
+| Send 10 USD to Bob             | Alice USD `-10`, Bob USD `+10`                                         |
+| Send 20 USD, Bob gets 17 EUR   | Alice USD `-20`, Treasury USD `+20`, Treasury EUR `-17`, Bob EUR `+17` |
 | Create lot "50 USD for 40 EUR" | Seller USD `-50`, Escrow USD `+50`                                     |
 | Buy that lot                   | Escrow USD `-50`, Buyer USD `+50`, Buyer EUR `-40`, Seller EUR `+40`   |
 
@@ -183,6 +185,15 @@ The work is now bounded by the page size and the number of the user's accounts, 
 5. **Idempotency**: each form render gets a key. Submitting it twice, even concurrently, executes once and returns the same result.
 6. **Insufficient funds** is detected by the database check constraint, so two parallel conversions can't overspend the same balance.
 
+### Transfers
+
+- The recipient is found by email. The form looks them up when the field loses focus and shows their name, so the sender can check who gets the money. Sending to yourself is rejected.
+- A **same-currency** transfer is two ledger entries: the sender's account is debited and the recipient's credited.
+- A **cross-currency** transfer goes through the treasury and reuses the conversion logic ([`prepareExchange`](src/server/conversion.ts)): the same rates, fee, rounding and slippage protection.
+- The transaction metadata stores a snapshot of both parties and the note. History shows it from each side: "To Bob · “Rent”" for the sender, "From Alice · “Rent”" for the recipient.
+- **No deadlocks**: two users sending money to each other at the same time lock the same two accounts. Ledger entries are always written in account id order, so both transactions lock in the same order; 50 concurrent transfers in opposite directions all complete.
+- Idempotency and insufficient funds work as for conversions. An idempotency key can't be reused for a different kind of operation.
+
 ## Roadmap
 
 - [x] Project setup: Next.js, TypeScript, Tailwind, Prisma, Docker Compose with Postgres
@@ -190,7 +201,7 @@ The work is now bounded by the page size and the number of the user's accounts, 
 - [x] Authentication: registration and login, automatic account creation, $100 welcome bonus
 - [x] Profile: balances, transaction history, Deposit/Withdraw placeholders
 - [x] Exchange rates and conversion between own accounts
-- [ ] Transfers to other users
+- [x] Transfers to other users
 - [ ] P2P marketplace: create, browse, buy and cancel lots
 - [ ] Admin panel: users, accounts, transactions
 - [ ] Tests (unit tests and end-to-end tests) and CI
@@ -259,6 +270,7 @@ src/
     (auth)/            Sign-up, login and logout
     convert/           Currency conversion
     profile/           Balances, transaction history, deposit/withdraw dialogs
+    transfer/          Sending money to other users
     api/health/        Health check endpoint
   components/          Shared React components
   lib/                 Code shared by server and client
@@ -277,11 +289,14 @@ src/
     ledger.ts          Posting transactions to the ledger
     users.ts           Registration and credential checks
     accounts.ts        Balances
-    conversion.ts      Executing conversions
-    db-errors.ts       Mapping database errors to domain errors
+    conversion.ts      Exchange pricing and executing conversions
+    db-errors.ts       Recognising database constraint errors
+    errors.ts          Business rule errors shown to users
     history.ts         Transaction history (raw SQL, keyset pagination)
     http.ts            JSON fetch with timeouts, retries and validation
+    idempotency.ts     Looking up already processed requests
     rates/             Rate providers, caching and refresh
+    transfers.ts       Transfers between users
   proxy.ts             Optimistic redirect for protected pages
   generated/prisma/    Generated Prisma client (git-ignored)
 ```

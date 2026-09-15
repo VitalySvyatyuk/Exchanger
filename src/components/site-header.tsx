@@ -41,6 +41,9 @@ async function UserMenu() {
       <Link href="/convert" className={buttonClassName("ghost", "sm")}>
         Convert
       </Link>
+      <Link href="/transfer" className={buttonClassName("ghost", "sm")}>
+        Send
+      </Link>
       <Link
         href="/profile"
         className={buttonClassName("ghost", "sm", "min-w-0")}

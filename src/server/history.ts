@@ -1,6 +1,7 @@
 import "server-only";
 import { Prisma, type TransactionType } from "@/generated/prisma/client";
 import { db } from "@/lib/db";
+import type { TransferMetadata } from "@/server/transfers";
 
 export const HISTORY_PAGE_SIZE = 20;
 
@@ -9,6 +10,7 @@ export type HistoryItem = {
   id: string;
   transactionId: string;
   type: TransactionType;
+  /** Human-readable details, e.g. "USD → EUR" or "To Bob · “Rent”". */
   description: string | null;
   /** Signed decimal string: positive credits, negative debits. */
   amount: string;
@@ -34,11 +36,27 @@ type HistoryRow = {
   transaction_id: string;
   type: TransactionType;
   description: string | null;
+  metadata: Prisma.JsonValue;
   currency_code: string;
   currency_symbol: string;
   currency_type: "FIAT" | "CRYPTO";
   currency_precision: number;
 };
+
+/**
+ * Transfers are shown from the viewer's side: "To Bob" for the sender,
+ * "From Alice" for the recipient.
+ */
+function describe(row: HistoryRow, userId: string): string | null {
+  if (row.type !== "TRANSFER" || !row.metadata) return row.description;
+
+  const transfer = row.metadata as TransferMetadata;
+  const counterparty =
+    transfer.senderId === userId
+      ? `To ${transfer.recipientName}`
+      : `From ${transfer.senderName}`;
+  return transfer.note ? `${counterparty} · “${transfer.note}”` : counterparty;
+}
 
 /**
  * The user's ledger entries across all (or one) of their accounts, newest
@@ -88,6 +106,7 @@ export async function getHistory(
       p.transaction_id::text AS transaction_id,
       t.type::text AS type,
       t.description,
+      t.metadata,
       c.code AS currency_code,
       c.symbol AS currency_symbol,
       c.type::text AS currency_type,
@@ -106,7 +125,7 @@ export async function getHistory(
       id: row.id.toString(),
       transactionId: row.transaction_id,
       type: row.type,
-      description: row.description,
+      description: describe(row, userId),
       amount: new Prisma.Decimal(row.amount).toFixed(row.currency_precision),
       createdAt: row.created_at,
       currency: {

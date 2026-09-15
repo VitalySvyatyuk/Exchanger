@@ -7,7 +7,8 @@ import { SUPPORTED_CURRENCIES } from "@/lib/currencies";
 import { formatAmount } from "@/lib/money";
 import { convertSchema, type ConvertFormState } from "@/lib/validation/convert";
 import { requireUser } from "@/server/auth";
-import { ConversionError, convertCurrency } from "@/server/conversion";
+import { convertCurrency } from "@/server/conversion";
+import { OperationError } from "@/server/errors";
 import { RatesUnavailableError } from "@/server/rates/rates";
 
 function field(formData: FormData, name: string): string {
@@ -63,10 +64,10 @@ export async function convert(
     };
   } catch (error) {
     if (
-      error instanceof ConversionError ||
+      error instanceof OperationError ||
       error instanceof RatesUnavailableError
     ) {
-      if (error instanceof ConversionError && error.code === "RATE_CHANGED") {
+      if (error instanceof OperationError && error.code === "RATE_CHANGED") {
         // Show the user the current rates.
         refresh();
       }

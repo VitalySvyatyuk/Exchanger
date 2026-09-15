@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
+import { CurrencySelect } from "@/components/currency-select";
 import { Button } from "@/components/ui/button";
 import {
   CONVERSION_FEE_RATE,
@@ -9,7 +10,7 @@ import {
   type UsdPrices,
 } from "@/lib/conversion";
 import { Decimal } from "@/lib/decimal";
-import { formatAmount } from "@/lib/money";
+import { checkAmountInput, formatAmount } from "@/lib/money";
 import type { ConvertFormState } from "@/lib/validation/convert";
 import { convert } from "./actions";
 
@@ -28,7 +29,6 @@ type ConvertFormProps = {
   initialIdempotencyKey: string;
 };
 
-const AMOUNT_PATTERN = /^\d{1,18}(\.\d{0,18})?$/;
 const feePercent = new Decimal(CONVERSION_FEE_RATE).times(100).toString();
 
 export function ConvertForm({
@@ -57,12 +57,11 @@ export function ConvertForm({
   const fromAccount = accounts.find((a) => a.code === from)!;
   const toAccount = accounts.find((a) => a.code === to)!;
 
-  const amountIsValid =
-    AMOUNT_PATTERN.test(amount) &&
-    new Decimal(amount).greaterThan(0) &&
-    new Decimal(amount).decimalPlaces() <= fromAccount.precision;
-  const exceedsBalance =
-    amountIsValid && new Decimal(amount).greaterThan(fromAccount.balance);
+  const { valid: amountIsValid, exceedsBalance } = checkAmountInput(
+    amount,
+    fromAccount.precision,
+    fromAccount.balance,
+  );
 
   const quote =
     from !== to && prices[from] && prices[to]
@@ -132,7 +131,7 @@ export function ConvertForm({
             name="from"
             label="Currency to pay"
             value={from}
-            accounts={accounts}
+            codes={accounts.map((a) => a.code)}
             onChange={selectFrom}
           />
         </div>
@@ -187,7 +186,7 @@ export function ConvertForm({
             name="to"
             label="Currency to receive"
             value={to}
-            accounts={accounts}
+            codes={accounts.map((a) => a.code)}
             onChange={selectTo}
           />
         </div>
@@ -228,36 +227,5 @@ export function ConvertForm({
         {pending ? "Converting…" : `Convert ${from} to ${to}`}
       </Button>
     </form>
-  );
-}
-
-function CurrencySelect({
-  name,
-  label,
-  value,
-  accounts,
-  onChange,
-}: {
-  name: string;
-  label: string;
-  value: string;
-  accounts: ConvertAccount[];
-  onChange: (code: string) => void;
-}) {
-  return (
-    <select
-      id={name}
-      name={name}
-      aria-label={label}
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      className="h-11 rounded-md border border-border bg-background px-3 font-mono text-sm"
-    >
-      {accounts.map((account) => (
-        <option key={account.code} value={account.code}>
-          {account.code}
-        </option>
-      ))}
-    </select>
   );
 }

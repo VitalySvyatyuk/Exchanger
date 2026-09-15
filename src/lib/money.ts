@@ -1,3 +1,5 @@
+import { Decimal } from "@/lib/decimal";
+
 type CurrencyFormat = {
   type: "FIAT" | "CRYPTO";
   /** Number of decimal places. */
@@ -26,4 +28,22 @@ export function formatAmount(amount: string, currency: CurrencyFormat): string {
 
   const sign = negative && /[1-9]/.test(integerPart + fraction) ? "-" : "";
   return `${sign}${integer}${fraction ? `.${fraction}` : ""}`;
+}
+
+const AMOUNT_INPUT = /^\d{1,18}(\.\d{0,18})?$/;
+
+/** Client-side check of an amount typed into a form. */
+export function checkAmountInput(
+  amount: string,
+  precision: number,
+  balance: string,
+): { valid: boolean; exceedsBalance: boolean } {
+  const valid =
+    AMOUNT_INPUT.test(amount) &&
+    new Decimal(amount).greaterThan(0) &&
+    new Decimal(amount).decimalPlaces() <= precision;
+  return {
+    valid,
+    exceedsBalance: valid && new Decimal(amount).greaterThan(balance),
+  };
 }
