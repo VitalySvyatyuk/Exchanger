@@ -38,9 +38,10 @@ Users hold balances in several fiat currencies and cryptocurrencies. They can co
 
 ### Admin panel
 
-- **Users**: list, search and view details.
-- **Accounts**: all accounts with their balances.
-- **Transactions**: full transaction log with filters (type, user, currency, date).
+- **Overview**: key numbers, reconciliation status, balances by account type per currency, activity in the last 24 hours and rate freshness.
+- **Users**: search by email, name or id; user page with balances, open lots, active sessions and history.
+- **Accounts**: all accounts with their balances, filtered by type and currency.
+- **Transactions**: full transaction log with filters (type, user, currency, date range), ledger entries and metadata.
 
 ## Tech stack
 
@@ -212,6 +213,15 @@ The work is now bounded by the page size and the number of the user's accounts, 
 - **Privacy**: other users see only the seller's display name, never their email.
 - History shows lot operations from each side: "Sold #3f9a1c2e to Bob" / "Bought #3f9a1c2e from Alice".
 
+## Admin panel
+
+Available at `/admin` to users with the `ADMIN` role (the seed creates one).
+
+- **Access control close to the data**: every admin page and every admin data function calls `requireAdmin()` itself, as the Next.js authentication guide recommends; the layout doesn't guard anything, because layouts don't re-render on navigation. Guests are redirected to log in, and other users get a 404, so the admin area isn't discoverable.
+- **Overview as an operations dashboard**: runs both reconciliation views and checks that the accounts of every currency sum to zero, and shows the totals held by users, escrow and the treasury (whose negative balance is the money the platform has issued).
+- **Transaction log**: newest first with keyset pagination. A new index on `transactions (created_at, id)` lets PostgreSQL read one page with a backward index scan instead of sorting the whole table. Filters combine freely; the user and currency filters match transactions with a ledger entry on that user's accounts or in that currency. Each row shows its ledger entries grouped by currency and its metadata (rates used, lot, parties).
+- Read-only by design: corrections to money would be made as new, offsetting transactions, never by editing data.
+
 ## Roadmap
 
 - [x] Project setup: Next.js, TypeScript, Tailwind, Prisma, Docker Compose with Postgres
@@ -221,7 +231,7 @@ The work is now bounded by the page size and the number of the user's accounts, 
 - [x] Exchange rates and conversion between own accounts
 - [x] Transfers to other users
 - [x] P2P marketplace: create, browse, buy and cancel lots
-- [ ] Admin panel: users, accounts, transactions
+- [x] Admin panel: users, accounts, transactions
 - [ ] Tests (unit tests and end-to-end tests) and CI
 
 ## Getting started
@@ -286,6 +296,7 @@ scripts/
 src/
   app/                 Next.js App Router pages, Server Actions and route handlers
     (auth)/            Sign-up, login and logout
+    admin/             Admin panel: overview, users, accounts, transactions
     convert/           Currency conversion
     market/            P2P marketplace: lots list, posting, buying, cancelling
     profile/           Balances, transaction history, deposit/withdraw dialogs
@@ -302,6 +313,7 @@ src/
     lots.ts            Lot price and comparison with the market
     money.ts           Precise amount formatting
     password.ts        Password hashing (scrypt)
+    search-params.ts   Parsing URL search params
     transaction-types.ts  Display labels for transaction types
     validation/        Zod schemas for forms
   server/              Server-only business logic
@@ -309,6 +321,7 @@ src/
     ledger.ts          Posting transactions to the ledger
     users.ts           Registration and credential checks
     accounts.ts        Balances
+    admin/             Admin queries, each guarded by requireAdmin()
     conversion.ts      Exchange pricing and executing conversions
     db-errors.ts       Recognising database constraint errors
     errors.ts          Business rule errors shown to users

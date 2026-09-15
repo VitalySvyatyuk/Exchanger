@@ -1,31 +1,36 @@
 import type { Route } from "next";
 import Link from "next/link";
 import { SUPPORTED_CURRENCIES } from "@/lib/currencies";
+import { formatDateTime } from "@/lib/format";
 import { formatAmount } from "@/lib/money";
 import { TRANSACTION_TYPE_LABELS } from "@/lib/transaction-types";
 import type { HistoryPage } from "@/server/history";
 
-const dateFormat = new Intl.DateTimeFormat("en-GB", {
-  dateStyle: "medium",
-  timeStyle: "short",
-  timeZone: "UTC",
-});
-
-function historyHref(params: { currency?: string; cursor?: string }): Route {
+function historyHref(
+  basePath: string,
+  params: { currency?: string; cursor?: string },
+): Route {
   const search = new URLSearchParams();
   if (params.currency) search.set("currency", params.currency);
   if (params.cursor) search.set("cursor", params.cursor);
   const query = search.toString();
-  return `/profile${query ? `?${query}` : ""}#history` as Route;
+  return `${basePath}${query ? `?${query}` : ""}#history` as Route;
 }
 
 type HistoryProps = {
   page: HistoryPage;
   currency?: string;
   isFirstPage: boolean;
+  /** Page the filter and pagination links point to. */
+  basePath?: string;
 };
 
-export function History({ page, currency, isFirstPage }: HistoryProps) {
+export function History({
+  page,
+  currency,
+  isFirstPage,
+  basePath = "/profile",
+}: HistoryProps) {
   const filters = [
     { label: "All", code: undefined },
     ...SUPPORTED_CURRENCIES.map((c) => ({ label: c.code, code: c.code })),
@@ -41,7 +46,7 @@ export function History({ page, currency, isFirstPage }: HistoryProps) {
             return (
               <Link
                 key={filter.label}
-                href={historyHref({ currency: filter.code })}
+                href={historyHref(basePath, { currency: filter.code })}
                 aria-current={active ? "page" : undefined}
                 scroll={false}
                 className={`rounded-full border px-3 py-1 text-sm ${
@@ -86,7 +91,7 @@ export function History({ page, currency, isFirstPage }: HistoryProps) {
                   <tr key={item.id} className="border-t border-border">
                     <td className="px-4 py-3 whitespace-nowrap text-muted">
                       <time dateTime={item.createdAt.toISOString()}>
-                        {dateFormat.format(item.createdAt)}
+                        {formatDateTime(item.createdAt)}
                       </time>
                     </td>
                     <td className="px-4 py-3">
@@ -125,7 +130,7 @@ export function History({ page, currency, isFirstPage }: HistoryProps) {
             <span />
           ) : (
             <Link
-              href={historyHref({ currency })}
+              href={historyHref(basePath, { currency })}
               scroll={false}
               className="text-sm underline"
             >
@@ -134,7 +139,10 @@ export function History({ page, currency, isFirstPage }: HistoryProps) {
           )}
           {page.nextCursor && (
             <Link
-              href={historyHref({ currency, cursor: page.nextCursor })}
+              href={historyHref(basePath, {
+                currency,
+                cursor: page.nextCursor,
+              })}
               scroll={false}
               className="text-sm underline"
             >

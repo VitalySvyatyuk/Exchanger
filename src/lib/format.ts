@@ -1,5 +1,16 @@
 import { Decimal } from "@/lib/decimal";
 
+const dateTimeFormat = new Intl.DateTimeFormat("en-GB", {
+  dateStyle: "medium",
+  timeStyle: "short",
+  timeZone: "UTC",
+});
+
+/** "15 Sept 2026, 09:33" in UTC. */
+export function formatDateTime(date: Date): string {
+  return dateTimeFormat.format(date);
+}
+
 /** "just now", "5 min ago", "3 h ago", "2 d ago". */
 export function formatAge(date: Date, now: number = Date.now()): string {
   const seconds = Math.max(0, Math.round((now - date.getTime()) / 1000));

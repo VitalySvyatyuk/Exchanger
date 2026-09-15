@@ -1,7 +1,7 @@
 import "server-only";
 import { createHash, randomBytes } from "node:crypto";
 import { cookies, headers } from "next/headers";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { cache } from "react";
 import type { UserRole } from "@/generated/prisma/client";
 import { db } from "@/lib/db";
@@ -81,5 +81,16 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
 export async function requireUser(): Promise<CurrentUser> {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
+  return user;
+}
+
+/**
+ * Returns the signed-in admin. Guests are sent to the login page; other
+ * users get a 404, so they can't tell that admin pages exist.
+ */
+export async function requireAdmin(): Promise<CurrentUser> {
+  const user = await getCurrentUser();
+  if (!user) redirect("/login?next=/admin");
+  if (user.role !== "ADMIN") notFound();
   return user;
 }

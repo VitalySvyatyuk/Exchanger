@@ -154,6 +154,8 @@ model Transaction {
 
   @@unique([initiatedById, idempotencyKey])
   @@index([type, createdAt])
+  // Admin transaction log: ORDER BY created_at DESC, id DESC with keyset pagination.
+  @@index([createdAt, id])
   @@index([lotId])
   @@map("transactions")
 }

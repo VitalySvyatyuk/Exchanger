@@ -6,6 +6,7 @@ import { after } from "next/server";
 import { Button, buttonClassName } from "@/components/ui/button";
 import { SUPPORTED_CURRENCIES } from "@/lib/currencies";
 import { formatAmount } from "@/lib/money";
+import { isUuid, param } from "@/lib/search-params";
 import { getUserBalances } from "@/server/accounts";
 import { getCurrentUser } from "@/server/auth";
 import {
@@ -26,12 +27,6 @@ export const metadata: Metadata = { title: "Marketplace" };
 
 const CODES: readonly string[] = SUPPORTED_CURRENCIES.map((c) => c.code);
 
-function param(value: string | string[] | undefined): string | undefined {
-  return typeof value === "string" && value ? value : undefined;
-}
-
-const UUID = /^[0-9a-f-]{36}$/i;
-
 function money(amount: string, code: string) {
   const currency = SUPPORTED_CURRENCIES.find((c) => c.code === code)!;
   return `${formatAmount(amount, currency)} ${code}`;
@@ -51,7 +46,7 @@ async function outcomeBanner(
   const bought = param(params.bought);
   const cancelled = param(params.cancelled);
   const lotId = bought ?? cancelled;
-  if (!lotId || !UUID.test(lotId) || !userId) return null;
+  if (!lotId || !isUuid(lotId) || !userId) return null;
 
   const lot: LotView | null = await getLot(lotId);
   if (bought && lot?.status === "FILLED" && lot.buyerId === userId) {
@@ -79,7 +74,7 @@ export default async function MarketPage({
   const buyFilter = CODES.includes(param(params.buy) ?? "")
     ? param(params.buy)
     : undefined;
-  const cursor = UUID.test(param(params.cursor) ?? "")
+  const cursor = isUuid(param(params.cursor))
     ? param(params.cursor)
     : undefined;
 

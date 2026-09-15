@@ -4,7 +4,7 @@ import { formatAmount } from "@/lib/money";
 import { getUserBalances } from "@/server/accounts";
 import { requireUser } from "@/server/auth";
 import { getHistory } from "@/server/history";
-import { History } from "./history";
+import { History } from "@/components/history";
 import { PaymentDialog } from "./payment-dialog";
 
 export const metadata: Metadata = { title: "Profile" };

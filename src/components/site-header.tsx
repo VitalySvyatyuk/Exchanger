@@ -46,6 +46,11 @@ async function Navigation() {
             </Link>
           </>
         )}
+        {user?.role === "ADMIN" && (
+          <Link href="/admin" className={buttonClassName("ghost", "sm")}>
+            Admin panel
+          </Link>
+        )}
       </nav>
 
       {user ? (
