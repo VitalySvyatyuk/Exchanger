@@ -68,11 +68,30 @@ model User {
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   accounts     Account[]
+  sessions     Session[]
   transactions Transaction[] @relation("TransactionInitiator")
   lotsSold     Lot[]         @relation("LotSeller")
   lotsBought   Lot[]         @relation("LotBuyer")
 
   @@map("users")
+}
+
+/// Server-side login session. The browser cookie holds a random token;
+/// only its SHA-256 hash is stored, so a database leak can't be used to
+/// hijack sessions.
+model Session {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tokenHash String   @unique @map("token_hash") @db.Char(64)
+  userId    String   @map("user_id") @db.Uuid
+  userAgent String?  @map("user_agent") @db.VarChar(255)
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
 }
 
 model Currency {

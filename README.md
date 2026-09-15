@@ -44,17 +44,17 @@ Users hold balances in several fiat currencies and cryptocurrencies. They can co
 
 ## Tech stack
 
-| Layer      | Technology                           |
-| ---------- | ------------------------------------ |
-| Framework  | Next.js (App Router), React          |
-| Language   | TypeScript                           |
-| Database   | PostgreSQL                           |
-| ORM        | Prisma                               |
-| Auth       | Auth.js (NextAuth), email + password |
-| Styling    | Tailwind CSS                         |
-| Validation | Zod                                  |
-| Testing    | Vitest, Playwright                   |
-| Infra      | Docker Compose (Postgres)            |
+| Layer      | Technology                        |
+| ---------- | --------------------------------- |
+| Framework  | Next.js (App Router), React       |
+| Language   | TypeScript                        |
+| Database   | PostgreSQL                        |
+| ORM        | Prisma                            |
+| Auth       | Database sessions, Server Actions |
+| Styling    | Tailwind CSS                      |
+| Validation | Zod                               |
+| Testing    | Vitest, Playwright                |
+| Infra      | Docker Compose (Postgres)         |
 
 ## Design principles
 
@@ -82,6 +82,7 @@ erDiagram
 | Table            | Purpose                                                                                                                     |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | `users`          | Email, password hash (scrypt), role (`USER` / `ADMIN`)                                                                      |
+| `sessions`       | Login sessions: SHA-256 hash of the cookie token, user, expiry, user agent                                                  |
 | `currencies`     | Code, name, symbol, type (`FIAT` / `CRYPTO`), precision                                                                     |
 | `accounts`       | One `USER` account per user per currency, plus one `TREASURY` and one `ESCROW` system account per currency                  |
 | `transactions`   | One business operation: type, initiator, idempotency key, related lot, metadata (e.g. the rate used)                        |
@@ -127,11 +128,22 @@ Reconciliation: the `account_balance_mismatches` view lists accounts whose store
 SELECT * FROM account_balance_mismatches;
 ```
 
+## Authentication
+
+Email and password auth built on the [Next.js authentication guide](https://nextjs.org/docs/app/guides/authentication), without an auth library:
+
+- **Sign-up** runs in one database transaction: it creates the user, one account per currency, and posts the $100 welcome bonus from the treasury through the ledger. The bonus uses a per-user idempotency key, so it can never be credited twice.
+- **Passwords** are hashed with scrypt (Node's built-in `crypto`). Login returns the same error for an unknown email and a wrong password, and verifies against a dummy hash when the email is unknown, so response time doesn't reveal registered emails.
+- **Sessions** are stored in PostgreSQL. The browser gets a random 256-bit token in an `httpOnly`, `SameSite=Lax` cookie (`Secure` in production); the database stores only its SHA-256 hash. Logging out deletes the session row, so a copied cookie stops working immediately.
+- **Authorization**: `src/proxy.ts` redirects visitors without a session cookie away from protected pages (an optimistic check, no database access). Pages and Server Actions verify the session against the database through `getCurrentUser()` / `requireUser()` in `src/server/auth.ts`.
+- **Redirect after login** accepts only local paths, which prevents open redirects (e.g. `?next=//evil.com`).
+- **CSRF**: Server Actions accept only `POST` requests from the same origin.
+
 ## Roadmap
 
 - [x] Project setup: Next.js, TypeScript, Tailwind, Prisma, Docker Compose with Postgres
 - [x] Database schema, migrations, seed data (currencies, admin user)
-- [ ] Authentication: registration and login, automatic account creation, $100 welcome bonus
+- [x] Authentication: registration and login, automatic account creation, $100 welcome bonus
 - [ ] Profile: balances, transaction history, Deposit/Withdraw placeholders
 - [ ] Exchange rates and conversion between own accounts
 - [ ] Transfers to other users
@@ -196,12 +208,23 @@ prisma/
   migrations/          SQL migrations, including integrity triggers and constraints
   seed.ts              Reference data seed
 src/
-  app/                 Next.js App Router pages and route handlers
+  app/                 Next.js App Router pages, Server Actions and route handlers
+    (auth)/            Sign-up, login and logout
+    profile/           User profile with balances
     api/health/        Health check endpoint
-  lib/
-    currencies.ts      Supported currencies
+  components/          Shared React components
+  lib/                 Code shared by server and client
+    currencies.ts      Supported currencies and welcome bonus
     db.ts              Prisma client singleton
     env.ts             Validated environment variables
+    money.ts           Precise amount formatting
     password.ts        Password hashing (scrypt)
+    validation/        Zod schemas for forms
+  server/              Server-only business logic
+    auth.ts            Sessions, current user
+    ledger.ts          Posting transactions to the ledger
+    users.ts           Registration and credential checks
+    accounts.ts        Balances
+  proxy.ts             Optimistic redirect for protected pages
   generated/prisma/    Generated Prisma client (git-ignored)
 ```

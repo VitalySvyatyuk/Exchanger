@@ -6,6 +6,7 @@
   --muted: #71717a;
   --border: #e4e4e7;
   --card: #fafafa;
+  --danger: #dc2626;
 }
 
 @theme inline {
@@ -14,6 +15,7 @@
   --color-muted: var(--muted);
   --color-border: var(--border);
   --color-card: var(--card);
+  --color-danger: var(--danger);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -25,6 +27,7 @@
     --muted: #a1a1aa;
     --border: #27272a;
     --card: #141414;
+    --danger: #f87171;
   }
 }
 

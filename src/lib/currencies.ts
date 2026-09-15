@@ -23,5 +23,8 @@ export const SUPPORTED_CURRENCIES = [
 
 export type CurrencyCode = (typeof SUPPORTED_CURRENCIES)[number]["code"];
 
-/** Currency credited to new users as a welcome bonus. */
+/** Currency that exchange rates are quoted against. */
 export const BASE_CURRENCY: CurrencyCode = "USD";
+
+/** Credited to every new user from the treasury. */
+export const WELCOME_BONUS = { currencyCode: "USD", amount: "100" } as const;

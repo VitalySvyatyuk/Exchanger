@@ -1,3 +1,5 @@
+import Link from "next/link";
+import { buttonClassName } from "@/components/ui/button";
 import { SUPPORTED_CURRENCIES } from "@/lib/currencies";
 
 const features = [
@@ -29,6 +31,14 @@ export default function Home() {
           Hold balances in several currencies, convert them at market rates, and
           trade directly with other users.
         </p>
+        <div>
+          <Link
+            href="/signup"
+            className={buttonClassName("primary", "h-11 px-5")}
+          >
+            Sign up and get $100
+          </Link>
+        </div>
       </section>
 
       <section className="grid gap-4 sm:grid-cols-3">
