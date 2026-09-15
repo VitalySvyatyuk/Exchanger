@@ -1,5 +1,9 @@
-// Prisma schema. Models are added in the "Database schema" roadmap step.
+// Prisma schema.
 // Docs: https://pris.ly/d/prisma-schema
+//
+// Money rules that Prisma can't express (check constraints, triggers,
+// partial indexes) live in raw SQL inside the migrations. See the
+// "Database integrity" section of the README.
 
 generator client {
   provider = "prisma-client"
@@ -9,4 +13,185 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum CurrencyType {
+  FIAT
+  CRYPTO
+}
+
+/// USER accounts belong to a user and can never go negative.
+/// TREASURY accounts are the platform's own money: the source of welcome
+/// bonuses and the counterparty of conversions. They may go negative.
+/// ESCROW accounts hold funds reserved by open lots.
+enum AccountType {
+  USER
+  TREASURY
+  ESCROW
+}
+
+enum TransactionType {
+  WELCOME_BONUS
+  CONVERSION
+  TRANSFER
+  LOT_HOLD
+  LOT_PURCHASE
+  LOT_CANCEL
+  DEPOSIT
+  WITHDRAWAL
+}
+
+enum LotStatus {
+  OPEN
+  FILLED
+  CANCELLED
+}
+
+enum RateSource {
+  FRANKFURTER
+  COINGECKO
+  SEED
+}
+
+model User {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Stored lowercased, so uniqueness is case-insensitive.
+  email        String   @unique @db.VarChar(255)
+  name         String?  @db.VarChar(100)
+  passwordHash String   @map("password_hash")
+  role         UserRole @default(USER)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  accounts     Account[]
+  transactions Transaction[] @relation("TransactionInitiator")
+  lotsSold     Lot[]         @relation("LotSeller")
+  lotsBought   Lot[]         @relation("LotBuyer")
+
+  @@map("users")
+}
+
+model Currency {
+  code      String       @id @db.VarChar(10)
+  name      String       @db.VarChar(50)
+  symbol    String       @db.VarChar(5)
+  type      CurrencyType
+  /// Number of decimal places, e.g. 2 for USD and 8 for BTC.
+  precision Int          @db.SmallInt
+  sortOrder Int          @default(0) @map("sort_order") @db.SmallInt
+
+  accounts     Account[]
+  lotsSelling  Lot[]          @relation("LotSellCurrency")
+  lotsBuying   Lot[]          @relation("LotBuyCurrency")
+  ratesAsBase  ExchangeRate[] @relation("RateBase")
+  ratesAsQuote ExchangeRate[] @relation("RateQuote")
+
+  @@map("currencies")
+}
+
+model Account {
+  id           String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  type         AccountType @default(USER)
+  /// Set for USER accounts, null for system (TREASURY / ESCROW) accounts.
+  userId       String?     @map("user_id") @db.Uuid
+  currencyCode String      @map("currency_code") @db.VarChar(10)
+  /// Maintained by a database trigger from ledger entries.
+  /// Never update it directly.
+  balance      Decimal     @default(0) @db.Decimal(36, 18)
+  createdAt    DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user          User?         @relation(fields: [userId], references: [id], onDelete: Restrict)
+  currency      Currency      @relation(fields: [currencyCode], references: [code], onDelete: Restrict)
+  ledgerEntries LedgerEntry[]
+
+  // One account per user per currency. System accounts are unique per
+  // (type, currency) through a partial index in the migration.
+  @@unique([userId, currencyCode])
+  @@index([currencyCode])
+  @@map("accounts")
+}
+
+/// A single business operation that moves money, e.g. a conversion or a
+/// lot purchase. Its ledger entries must sum to zero per currency.
+model Transaction {
+  id             String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  type           TransactionType
+  /// Client-supplied key that makes retries safe. Unique per initiator.
+  idempotencyKey String?         @map("idempotency_key") @db.VarChar(100)
+  initiatedById  String?         @map("initiated_by_id") @db.Uuid
+  lotId          String?         @map("lot_id") @db.Uuid
+  description    String?         @db.VarChar(255)
+  /// Operation details, e.g. the exchange rate used for a conversion.
+  metadata       Json?
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  initiatedBy   User?         @relation("TransactionInitiator", fields: [initiatedById], references: [id], onDelete: Restrict)
+  lot           Lot?          @relation(fields: [lotId], references: [id], onDelete: Restrict)
+  ledgerEntries LedgerEntry[]
+
+  @@unique([initiatedById, idempotencyKey])
+  @@index([type, createdAt])
+  @@index([lotId])
+  @@map("transactions")
+}
+
+/// Append-only. Positive amounts credit the account, negative amounts debit it.
+model LedgerEntry {
+  id            BigInt   @id @default(autoincrement())
+  transactionId String   @map("transaction_id") @db.Uuid
+  accountId     String   @map("account_id") @db.Uuid
+  amount        Decimal  @db.Decimal(36, 18)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Restrict)
+  account     Account     @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  @@index([transactionId])
+  @@index([accountId, createdAt])
+  @@map("ledger_entries")
+}
+
+/// A fixed-price offer, e.g. "Sell 50 USD for 40 EUR".
+model Lot {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sellerId         String    @map("seller_id") @db.Uuid
+  buyerId          String?   @map("buyer_id") @db.Uuid
+  sellCurrencyCode String    @map("sell_currency_code") @db.VarChar(10)
+  sellAmount       Decimal   @map("sell_amount") @db.Decimal(36, 18)
+  buyCurrencyCode  String    @map("buy_currency_code") @db.VarChar(10)
+  buyAmount        Decimal   @map("buy_amount") @db.Decimal(36, 18)
+  status           LotStatus @default(OPEN)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  closedAt         DateTime? @map("closed_at") @db.Timestamptz(3)
+
+  seller       User          @relation("LotSeller", fields: [sellerId], references: [id], onDelete: Restrict)
+  buyer        User?         @relation("LotBuyer", fields: [buyerId], references: [id], onDelete: Restrict)
+  sellCurrency Currency      @relation("LotSellCurrency", fields: [sellCurrencyCode], references: [code], onDelete: Restrict)
+  buyCurrency  Currency      @relation("LotBuyCurrency", fields: [buyCurrencyCode], references: [code], onDelete: Restrict)
+  transactions Transaction[]
+
+  @@index([status, createdAt])
+  @@index([sellerId, status])
+  @@index([buyerId])
+  @@map("lots")
+}
+
+/// Rate history: 1 unit of `base` equals `rate` units of `quote`.
+model ExchangeRate {
+  id                BigInt     @id @default(autoincrement())
+  baseCurrencyCode  String     @map("base_currency_code") @db.VarChar(10)
+  quoteCurrencyCode String     @map("quote_currency_code") @db.VarChar(10)
+  rate              Decimal    @db.Decimal(36, 18)
+  source            RateSource
+  fetchedAt         DateTime   @default(now()) @map("fetched_at") @db.Timestamptz(3)
+
+  baseCurrency  Currency @relation("RateBase", fields: [baseCurrencyCode], references: [code], onDelete: Restrict)
+  quoteCurrency Currency @relation("RateQuote", fields: [quoteCurrencyCode], references: [code], onDelete: Restrict)
+
+  @@index([baseCurrencyCode, quoteCurrencyCode, fetchedAt(sort: Desc)])
+  @@map("exchange_rates")
 }

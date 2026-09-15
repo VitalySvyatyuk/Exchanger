@@ -1,10 +1,4 @@
-const currencies = [
-  { code: "USD", name: "US Dollar", type: "Fiat" },
-  { code: "EUR", name: "Euro", type: "Fiat" },
-  { code: "GBP", name: "British Pound", type: "Fiat" },
-  { code: "BTC", name: "Bitcoin", type: "Crypto" },
-  { code: "ETH", name: "Ether", type: "Crypto" },
-];
+import { SUPPORTED_CURRENCIES } from "@/lib/currencies";
 
 const features = [
   {
@@ -52,11 +46,11 @@ export default function Home() {
       <section className="flex flex-col gap-3">
         <h2 className="text-xl font-semibold">Supported currencies</h2>
         <ul className="flex flex-wrap gap-2">
-          {currencies.map((currency) => (
+          {SUPPORTED_CURRENCIES.map((currency) => (
             <li
               key={currency.code}
               className="rounded-full border border-border px-3 py-1 text-sm"
-              title={`${currency.name} (${currency.type})`}
+              title={`${currency.name} (${currency.type === "FIAT" ? "fiat" : "crypto"})`}
             >
               <span className="font-mono font-medium">{currency.code}</span>
               <span className="ml-2 text-muted">{currency.name}</span>

@@ -58,26 +58,79 @@ Users hold balances in several fiat currencies and cryptocurrencies. They can co
 
 ## Design principles
 
-- **Ledger-based balances**: every money movement is recorded as ledger entries, and an account's balance is derived from them. Each transaction's debit and credit entries must balance.
-- **Exact money arithmetic**: amounts are stored as `NUMERIC`, never floating point. Each currency has its own precision (2 decimal places for fiat, 8 for BTC, 18 for ETH).
+- **Double-entry ledger**: every money movement is a transaction made of ledger entries, and each transaction's entries sum to zero per currency. Account balances are derived from the ledger.
+- **Exact money arithmetic**: amounts are stored as `NUMERIC(36, 18)`, never floating point. Each currency has its own precision (2 decimal places for fiat, 8 for BTC, 18 for ETH).
 - **Atomic operations**: transfers, conversions and lot purchases each run inside a single database transaction with row-level locking, so balances can't go negative and one lot can't be bought twice.
 - **Idempotency**: operations that change money accept an idempotency key, so a retried request can't be applied twice.
 - **Auditability**: transactions are append-only; corrections are made with new, offsetting transactions.
+- **Integrity in the database**: the rules above are enforced by PostgreSQL itself, not only by application code. See [Database integrity](#database-integrity).
 
-## Data model (draft)
+## Data model
 
-- `User`: id, email, password hash, role (`user` / `admin`), created at
-- `Currency`: code, name, type (`fiat` / `crypto`), precision
-- `Account`: id, user, currency, created at
-- `Transaction`: id, type (`welcome_bonus`, `conversion`, `transfer`, `lot_purchase`, `deposit`, `withdrawal`), status, idempotency key, created at
-- `LedgerEntry`: id, transaction, account, amount (signed)
-- `Lot`: id, seller, sell currency and amount, buy currency and amount, status, buyer, created at, filled at
-- `ExchangeRate`: base currency, quote currency, rate, fetched at
+```mermaid
+erDiagram
+  User ||--o{ Account : owns
+  User ||--o{ Transaction : initiates
+  User ||--o{ Lot : "sells / buys"
+  Currency ||--o{ Account : "denominates"
+  Currency ||--o{ ExchangeRate : "base / quote"
+  Account ||--o{ LedgerEntry : "has"
+  Transaction ||--|{ LedgerEntry : "consists of"
+  Lot ||--o{ Transaction : "hold / purchase / cancel"
+```
+
+| Table            | Purpose                                                                                                                     |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `users`          | Email, password hash (scrypt), role (`USER` / `ADMIN`)                                                                      |
+| `currencies`     | Code, name, symbol, type (`FIAT` / `CRYPTO`), precision                                                                     |
+| `accounts`       | One `USER` account per user per currency, plus one `TREASURY` and one `ESCROW` system account per currency                  |
+| `transactions`   | One business operation: type, initiator, idempotency key, related lot, metadata (e.g. the rate used)                        |
+| `ledger_entries` | Signed amount posted to one account. Positive credits, negative debits                                                      |
+| `lots`           | P2P offers: sell currency and amount, buy currency and amount, status (`OPEN` / `FILLED` / `CANCELLED`)                     |
+| `exchange_rates` | Rate history: 1 unit of the base currency equals `rate` units of the quote currency. Source: Frankfurter, CoinGecko or seed |
+
+### System accounts
+
+Money never appears or disappears; it moves between accounts.
+
+- **Treasury** (one per currency) is the platform's own account. It funds welcome bonuses and is the counterparty of conversions. It is the only account allowed to go negative: its negative balance is the amount the platform has issued.
+- **Escrow** (one per currency) holds funds reserved by open lots.
+
+Examples:
+
+| Operation                      | Ledger entries                                                         |
+| ------------------------------ | ---------------------------------------------------------------------- |
+| Welcome bonus                  | User USD `+100`, Treasury USD `-100`                                   |
+| Convert 50 USD to 43 EUR       | User USD `-50`, Treasury USD `+50`, Treasury EUR `-43`, User EUR `+43` |
+| Create lot "50 USD for 40 EUR" | Seller USD `-50`, Escrow USD `+50`                                     |
+| Buy that lot                   | Escrow USD `-50`, Buyer USD `+50`, Buyer EUR `-40`, Seller EUR `+40`   |
+
+## Database integrity
+
+Implemented in [`prisma/migrations/*_ledger_integrity`](prisma/migrations), because Prisma can't express these rules in `schema.prisma`:
+
+| Rule                                             | Mechanism                                                                                  |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------ |
+| Balances always match the ledger                 | `AFTER INSERT` trigger on `ledger_entries` updates `accounts.balance`                      |
+| Balances can't be edited directly                | `BEFORE UPDATE` trigger on `accounts` (allowed only from the ledger trigger)               |
+| User and escrow accounts can't go negative       | `CHECK` constraint; the balance `UPDATE` also locks the row, serializing concurrent spends |
+| Every transaction balances per currency          | `DEFERRABLE INITIALLY DEFERRED` constraint trigger, checked at `COMMIT`                    |
+| Amounts respect currency precision               | Checked in the ledger trigger (e.g. no `0.001 USD`)                                        |
+| Ledger and transactions are append-only          | `BEFORE UPDATE OR DELETE` triggers                                                         |
+| One treasury and one escrow account per currency | Partial unique index `WHERE user_id IS NULL`                                               |
+| Lot state is consistent                          | `CHECK`: an open lot has no buyer, a filled lot has a buyer, etc.                          |
+| Idempotency keys are unique per user             | Unique index on `(initiated_by_id, idempotency_key)`                                       |
+
+Reconciliation: the `account_balance_mismatches` view lists accounts whose stored balance differs from the sum of their ledger entries. It must always be empty.
+
+```sql
+SELECT * FROM account_balance_mismatches;
+```
 
 ## Roadmap
 
 - [x] Project setup: Next.js, TypeScript, Tailwind, Prisma, Docker Compose with Postgres
-- [ ] Database schema, migrations, seed data (currencies, admin user)
+- [x] Database schema, migrations, seed data (currencies, admin user)
 - [ ] Authentication: registration and login, automatic account creation, $100 welcome bonus
 - [ ] Profile: balances, transaction history, Deposit/Withdraw placeholders
 - [ ] Exchange rates and conversion between own accounts
@@ -108,36 +161,47 @@ npm run db:up
 # 4. Apply database migrations
 npm run db:migrate
 
-# 5. Start the dev server
+# 5. Seed reference data: currencies, system accounts, fallback rates, admin user
+npm run db:seed
+
+# 6. Start the dev server
 npm run dev
 ```
 
 The app runs at http://localhost:3000. The health check at http://localhost:3000/api/health confirms that the app can reach the database.
 
+The seed creates an admin user from `ADMIN_EMAIL` and `ADMIN_PASSWORD`. If `ADMIN_PASSWORD` is empty, a random password is generated and printed once. The seed is safe to run repeatedly.
+
 ### Scripts
 
-| Script               | Description                             |
-| -------------------- | --------------------------------------- |
-| `npm run dev`        | Start the development server            |
-| `npm run build`      | Build for production                    |
-| `npm run lint`       | Run ESLint                              |
-| `npm run typecheck`  | Type-check with the TypeScript compiler |
-| `npm run format`     | Format code with Prettier               |
-| `npm run db:up`      | Start PostgreSQL with Docker Compose    |
-| `npm run db:migrate` | Create and apply migrations (dev)       |
-| `npm run db:deploy`  | Apply migrations (production)           |
-| `npm run db:studio`  | Open Prisma Studio                      |
+| Script               | Description                                         |
+| -------------------- | --------------------------------------------------- |
+| `npm run dev`        | Start the development server                        |
+| `npm run build`      | Build for production                                |
+| `npm run lint`       | Run ESLint                                          |
+| `npm run typecheck`  | Type-check with the TypeScript compiler             |
+| `npm run format`     | Format code with Prettier                           |
+| `npm run db:up`      | Start PostgreSQL with Docker Compose                |
+| `npm run db:migrate` | Create and apply migrations (dev)                   |
+| `npm run db:deploy`  | Apply migrations (production)                       |
+| `npm run db:seed`    | Seed reference data                                 |
+| `npm run db:reset`   | Drop the dev database, re-apply migrations and seed |
+| `npm run db:studio`  | Open Prisma Studio                                  |
 
 ## Project structure
 
 ```
 prisma/
   schema.prisma        Database schema
+  migrations/          SQL migrations, including integrity triggers and constraints
+  seed.ts              Reference data seed
 src/
   app/                 Next.js App Router pages and route handlers
     api/health/        Health check endpoint
   lib/
+    currencies.ts      Supported currencies
     db.ts              Prisma client singleton
     env.ts             Validated environment variables
+    password.ts        Password hashing (scrypt)
   generated/prisma/    Generated Prisma client (git-ignored)
 ```
