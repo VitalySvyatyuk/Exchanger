@@ -15,3 +15,18 @@ export function isUniqueViolation(error: unknown, field: string): boolean {
     ? target.includes(field)
     : String(target).includes(field);
 }
+
+/**
+ * True if the error is a violation of the named CHECK constraint.
+ *
+ * Prisma surfaces these (raised here by a trigger's UPDATE) as an unknown
+ * request error, with the PostgreSQL message escaped inside its own message,
+ * so match on the SQLSTATE and the constraint name.
+ */
+export function isCheckViolation(error: unknown, constraint: string): boolean {
+  return (
+    error instanceof Error &&
+    error.message.includes("23514") &&
+    error.message.includes(constraint)
+  );
+}

@@ -18,7 +18,7 @@ Users hold balances in several fiat currencies and cryptocurrencies. They can co
 
 ### Transfers and conversion
 
-- **Convert between own accounts**: for example, USD → EUR at the current exchange rate.
+- **Convert between own accounts**: for example, USD → EUR at the current exchange rate, with a 0.5% fee and a live preview of the amount received.
 - **Send money to another user**, with optional conversion: for example, send USD from your account and the recipient receives EUR.
 - **Exchange rates** come from public APIs ([Frankfurter](https://frankfurter.dev) for fiat, [CoinGecko](https://www.coingecko.com/en/api) for crypto). They are cached in the database, so the app keeps working if an API is slow or unavailable.
 
@@ -158,13 +158,38 @@ The fix ([`src/server/history.ts`](src/server/history.ts)):
 
 The work is now bounded by the page size and the number of the user's accounts, not by the history length. Paging through all 1,000 pages of that user returned the same entries in the same order as a plain full query.
 
+## Exchange rates and conversion
+
+### Rate providers
+
+| Currencies | Source                                             | Refresh after | Too old to convert after    |
+| ---------- | -------------------------------------------------- | ------------- | --------------------------- |
+| EUR, GBP   | [Frankfurter](https://frankfurter.dev) (ECB rates) | 1 hour        | 4 days (ECB skips weekends) |
+| BTC, ETH   | [CoinGecko](https://www.coingecko.com/en/api)      | 1 minute      | 10 minutes                  |
+
+- **Rates are stored as published** (USD→EUR from Frankfurter, BTC→USD from CoinGecko) and kept as history in `exchange_rates`. The latest rate per currency is read with one index lookup per currency, however long the history grows.
+- **Stale-while-revalidate**: pages render with the rates in the database and refresh stale ones after the response is sent (`after()` in Next.js), so an API call never slows down a page.
+- **One refresh at a time**: a refresh takes a PostgreSQL advisory lock (`pg_try_advisory_xact_lock`) and re-checks freshness inside it. Concurrent requests skip instead of calling the API again; five parallel refreshes produce one API call per provider.
+- **HTTP client** ([`src/server/http.ts`](src/server/http.ts)): timeout per attempt, retries with exponential backoff and jitter on network errors, timeouts, `429` and `5xx`, honours `Retry-After`, and validates response bodies with Zod. `4xx` and malformed bodies fail immediately.
+- **Outages**: if a provider is down, the last known rates are still shown. Conversions are refused only when a rate is older than the limit above.
+- `npm run rates:refresh` forces a refresh, e.g. from a cron job. `COINGECKO_API_KEY` is optional.
+
+### Conversion
+
+1. The form previews the result in the browser using the same decimal code as the server ([`src/lib/conversion.ts`](src/lib/conversion.ts)).
+2. On submit, the server refreshes rates if needed and recomputes the quote. The result is **rounded down** to the target currency's precision.
+3. **Slippage protection**: the form sends the rate the user saw; if the current rate is more than 0.5% worse, the conversion is rejected and the page shows the new rate.
+4. The conversion is posted as one ledger transaction through the treasury (see [System accounts](#system-accounts)). The rates, their sources and the fee are stored in the transaction's metadata.
+5. **Idempotency**: each form render gets a key. Submitting it twice, even concurrently, executes once and returns the same result.
+6. **Insufficient funds** is detected by the database check constraint, so two parallel conversions can't overspend the same balance.
+
 ## Roadmap
 
 - [x] Project setup: Next.js, TypeScript, Tailwind, Prisma, Docker Compose with Postgres
 - [x] Database schema, migrations, seed data (currencies, admin user)
 - [x] Authentication: registration and login, automatic account creation, $100 welcome bonus
 - [x] Profile: balances, transaction history, Deposit/Withdraw placeholders
-- [ ] Exchange rates and conversion between own accounts
+- [x] Exchange rates and conversion between own accounts
 - [ ] Transfers to other users
 - [ ] P2P marketplace: create, browse, buy and cancel lots
 - [ ] Admin panel: users, accounts, transactions
@@ -205,19 +230,20 @@ The seed creates an admin user from `ADMIN_EMAIL` and `ADMIN_PASSWORD`. If `ADMI
 
 ### Scripts
 
-| Script               | Description                                         |
-| -------------------- | --------------------------------------------------- |
-| `npm run dev`        | Start the development server                        |
-| `npm run build`      | Build for production                                |
-| `npm run lint`       | Run ESLint                                          |
-| `npm run typecheck`  | Type-check with the TypeScript compiler             |
-| `npm run format`     | Format code with Prettier                           |
-| `npm run db:up`      | Start PostgreSQL with Docker Compose                |
-| `npm run db:migrate` | Create and apply migrations (dev)                   |
-| `npm run db:deploy`  | Apply migrations (production)                       |
-| `npm run db:seed`    | Seed reference data                                 |
-| `npm run db:reset`   | Drop the dev database, re-apply migrations and seed |
-| `npm run db:studio`  | Open Prisma Studio                                  |
+| Script                  | Description                                         |
+| ----------------------- | --------------------------------------------------- |
+| `npm run dev`           | Start the development server                        |
+| `npm run build`         | Build for production                                |
+| `npm run lint`          | Run ESLint                                          |
+| `npm run typecheck`     | Type-check with the TypeScript compiler             |
+| `npm run format`        | Format code with Prettier                           |
+| `npm run db:up`         | Start PostgreSQL with Docker Compose                |
+| `npm run db:migrate`    | Create and apply migrations (dev)                   |
+| `npm run db:deploy`     | Apply migrations (production)                       |
+| `npm run db:seed`       | Seed reference data                                 |
+| `npm run db:reset`      | Drop the dev database, re-apply migrations and seed |
+| `npm run db:studio`     | Open Prisma Studio                                  |
+| `npm run rates:refresh` | Fetch exchange rates from all providers now         |
 
 ## Project structure
 
@@ -226,16 +252,22 @@ prisma/
   schema.prisma        Database schema
   migrations/          SQL migrations, including integrity triggers and constraints
   seed.ts              Reference data seed
+scripts/
+  refresh-rates.ts     Force an exchange rate refresh
 src/
   app/                 Next.js App Router pages, Server Actions and route handlers
     (auth)/            Sign-up, login and logout
+    convert/           Currency conversion
     profile/           Balances, transaction history, deposit/withdraw dialogs
     api/health/        Health check endpoint
   components/          Shared React components
   lib/                 Code shared by server and client
+    conversion.ts      Conversion quote, fee and slippage math
     currencies.ts      Supported currencies and welcome bonus
     db.ts              Prisma client singleton
+    decimal.ts         Decimal configuration for money math
     env.ts             Validated environment variables
+    format.ts          Price and relative time formatting
     money.ts           Precise amount formatting
     password.ts        Password hashing (scrypt)
     transaction-types.ts  Display labels for transaction types
@@ -245,7 +277,11 @@ src/
     ledger.ts          Posting transactions to the ledger
     users.ts           Registration and credential checks
     accounts.ts        Balances
+    conversion.ts      Executing conversions
+    db-errors.ts       Mapping database errors to domain errors
     history.ts         Transaction history (raw SQL, keyset pagination)
+    http.ts            JSON fetch with timeouts, retries and validation
+    rates/             Rate providers, caching and refresh
   proxy.ts             Optimistic redirect for protected pages
   generated/prisma/    Generated Prisma client (git-ignored)
 ```

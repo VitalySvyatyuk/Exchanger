@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { after } from "next/server";
+import { RatesTable } from "@/components/rates-table";
 import { buttonClassName } from "@/components/ui/button";
-import { SUPPORTED_CURRENCIES } from "@/lib/currencies";
+import { getLatestRates, refreshRates } from "@/server/rates/rates";
 
 const features = [
   {
@@ -20,7 +22,11 @@ const features = [
   },
 ];
 
-export default function Home() {
+export default async function Home() {
+  const rates = await getLatestRates();
+  // Serve cached rates now; refresh stale ones after the response is sent.
+  after(() => refreshRates());
+
   return (
     <div className="flex flex-col gap-12">
       <section className="flex flex-col gap-4">
@@ -32,10 +38,7 @@ export default function Home() {
           trade directly with other users.
         </p>
         <div>
-          <Link
-            href="/signup"
-            className={buttonClassName("primary", "h-11 px-5")}
-          >
+          <Link href="/signup" className={buttonClassName("primary", "lg")}>
             Sign up and get $100
           </Link>
         </div>
@@ -54,19 +57,8 @@ export default function Home() {
       </section>
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-xl font-semibold">Supported currencies</h2>
-        <ul className="flex flex-wrap gap-2">
-          {SUPPORTED_CURRENCIES.map((currency) => (
-            <li
-              key={currency.code}
-              className="rounded-full border border-border px-3 py-1 text-sm"
-              title={`${currency.name} (${currency.type === "FIAT" ? "fiat" : "crypto"})`}
-            >
-              <span className="font-mono font-medium">{currency.code}</span>
-              <span className="ml-2 text-muted">{currency.name}</span>
-            </li>
-          ))}
-        </ul>
+        <h2 className="text-xl font-semibold">Exchange rates</h2>
+        <RatesTable rates={rates} />
       </section>
     </div>
   );

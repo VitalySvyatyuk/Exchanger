@@ -6,6 +6,8 @@ const envSchema = z.object({
     .enum(["development", "test", "production"])
     .default("development"),
   DATABASE_URL: z.url(),
+  // Optional: CoinGecko's public API works without a key, with lower limits.
+  COINGECKO_API_KEY: z.string().min(1).optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);
