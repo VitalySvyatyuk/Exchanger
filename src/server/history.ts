@@ -1,6 +1,8 @@
 import "server-only";
 import { Prisma, type TransactionType } from "@/generated/prisma/client";
 import { db } from "@/lib/db";
+import { lotNumber } from "@/lib/lots";
+import type { LotMetadata } from "@/server/lots";
 import type { TransferMetadata } from "@/server/transfers";
 
 export const HISTORY_PAGE_SIZE = 20;
@@ -44,18 +46,37 @@ type HistoryRow = {
 };
 
 /**
- * Transfers are shown from the viewer's side: "To Bob" for the sender,
- * "From Alice" for the recipient.
+ * Operations between users are described from the viewer's side, e.g.
+ * "To Bob" for the sender and "From Alice" for the recipient.
  */
 function describe(row: HistoryRow, userId: string): string | null {
-  if (row.type !== "TRANSFER" || !row.metadata) return row.description;
+  if (!row.metadata) return row.description;
 
-  const transfer = row.metadata as TransferMetadata;
-  const counterparty =
-    transfer.senderId === userId
-      ? `To ${transfer.recipientName}`
-      : `From ${transfer.senderName}`;
-  return transfer.note ? `${counterparty} · “${transfer.note}”` : counterparty;
+  switch (row.type) {
+    case "TRANSFER": {
+      const transfer = row.metadata as TransferMetadata;
+      const counterparty =
+        transfer.senderId === userId
+          ? `To ${transfer.recipientName}`
+          : `From ${transfer.senderName}`;
+      return transfer.note
+        ? `${counterparty} · “${transfer.note}”`
+        : counterparty;
+    }
+    case "LOT_HOLD":
+    case "LOT_CANCEL": {
+      const lot = row.metadata as LotMetadata;
+      return `${lotNumber(lot.lotId)} · ${lot.sellAmount} ${lot.sellCurrency} for ${lot.buyAmount} ${lot.buyCurrency}`;
+    }
+    case "LOT_PURCHASE": {
+      const lot = row.metadata as LotMetadata;
+      return lot.sellerId === userId
+        ? `Sold ${lotNumber(lot.lotId)} to ${lot.buyerName}`
+        : `Bought ${lotNumber(lot.lotId)} from ${lot.sellerName}`;
+    }
+    default:
+      return row.description;
+  }
 }
 
 /**

@@ -5,7 +5,10 @@ export type OperationErrorCode =
   | "AMOUNT_TOO_SMALL"
   | "RATE_CHANGED"
   | "RECIPIENT_NOT_FOUND"
-  | "SELF_TRANSFER";
+  | "SELF_TRANSFER"
+  | "LOT_NOT_FOUND"
+  | "LOT_NOT_AVAILABLE"
+  | "OWN_LOT";
 
 /**
  * An expected business rule violation. Its message is safe to show to the

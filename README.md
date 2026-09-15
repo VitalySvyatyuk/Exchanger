@@ -24,11 +24,11 @@ Users hold balances in several fiat currencies and cryptocurrencies. They can co
 
 ### P2P marketplace (lots)
 
-- A user creates a lot, for example: **"Sell 50 USD for 40 EUR"**.
-- The lot's amount is reserved (held) on the seller's account until it is bought or cancelled.
-- Other users browse open lots and can **buy** one if the offer is better than the market rate.
-- The seller can cancel an open lot, which releases the held funds.
-- Lot statuses: `open` → `filled` / `cancelled`.
+- A user creates a lot, for example: **"Sell 50 USD for 40 EUR"**. The form shows the market value and how the price compares with it.
+- The lot's amount is held in escrow until it is bought or cancelled.
+- Anyone can browse open lots, filtered by currency pair, with each lot's price compared with the market rate. Signed-in users can **buy** a lot after a confirmation step.
+- The seller can cancel an open lot, which returns the held funds.
+- Lot statuses: `OPEN` → `FILLED` / `CANCELLED`.
 
 ### Profile
 
@@ -124,10 +124,14 @@ Implemented in [`prisma/migrations/*_ledger_integrity`](prisma/migrations), beca
 | Lot state is consistent                          | `CHECK`: an open lot has no buyer, a filled lot has a buyer, etc.                          |
 | Idempotency keys are unique per user             | Unique index on `(initiated_by_id, idempotency_key)`                                       |
 
-Reconciliation: the `account_balance_mismatches` view lists accounts whose stored balance differs from the sum of their ledger entries. It must always be empty.
+Reconciliation views, which must always be empty:
+
+- `account_balance_mismatches`: accounts whose stored balance differs from the sum of their ledger entries (the ledger checked against itself).
+- `escrow_balance_mismatches`: currencies whose escrow balance differs from the total of open lots selling that currency (the ledger checked against the marketplace).
 
 ```sql
 SELECT * FROM account_balance_mismatches;
+SELECT * FROM escrow_balance_mismatches;
 ```
 
 ## Authentication
@@ -194,6 +198,20 @@ The work is now bounded by the page size and the number of the user's accounts, 
 - **No deadlocks**: two users sending money to each other at the same time lock the same two accounts. Ledger entries are always written in account id order, so both transactions lock in the same order; 50 concurrent transfers in opposite directions all complete.
 - Idempotency and insufficient funds work as for conversions. An idempotency key can't be reused for a different kind of operation.
 
+### Marketplace
+
+| Operation  | Ledger entries (lot "30 USD for 24 EUR")                             | Guarded by                                              |
+| ---------- | -------------------------------------------------------------------- | ------------------------------------------------------- |
+| Create lot | Seller USD `-30`, Escrow USD `+30`                                   | Lot row and hold in one DB transaction                  |
+| Buy lot    | Escrow USD `-30`, Buyer USD `+30`, Buyer EUR `-24`, Seller EUR `+24` | `UPDATE lots … WHERE status = 'OPEN'`                   |
+| Cancel lot | Escrow USD `-30`, Seller USD `+30`                                   | `UPDATE lots … WHERE status = 'OPEN' AND seller_id = ?` |
+
+- **Exactly one buyer**: a purchase claims the lot with a conditional `UPDATE` in the same DB transaction as the payment. Concurrent buyers wait on the row lock, then match zero rows and get "no longer available". In a test, 10 buyers racing for one lot produced 1 purchase and 9 refusals; 10 buy-vs-cancel races each ended with exactly one winner.
+- **All or nothing**: if the buyer can't pay, the check constraint aborts the DB transaction, including the status change, so the lot stays open. A seller who can't cover a lot gets an error and no lot is created.
+- **Idempotency without client keys**: purchase and cancellation keys are derived from the lot (`lot-purchase:<lot id>`), because a user can buy or cancel a given lot only once. A double click returns the original result.
+- **Privacy**: other users see only the seller's display name, never their email.
+- History shows lot operations from each side: "Sold #3f9a1c2e to Bob" / "Bought #3f9a1c2e from Alice".
+
 ## Roadmap
 
 - [x] Project setup: Next.js, TypeScript, Tailwind, Prisma, Docker Compose with Postgres
@@ -202,7 +220,7 @@ The work is now bounded by the page size and the number of the user's accounts, 
 - [x] Profile: balances, transaction history, Deposit/Withdraw placeholders
 - [x] Exchange rates and conversion between own accounts
 - [x] Transfers to other users
-- [ ] P2P marketplace: create, browse, buy and cancel lots
+- [x] P2P marketplace: create, browse, buy and cancel lots
 - [ ] Admin panel: users, accounts, transactions
 - [ ] Tests (unit tests and end-to-end tests) and CI
 
@@ -269,6 +287,7 @@ src/
   app/                 Next.js App Router pages, Server Actions and route handlers
     (auth)/            Sign-up, login and logout
     convert/           Currency conversion
+    market/            P2P marketplace: lots list, posting, buying, cancelling
     profile/           Balances, transaction history, deposit/withdraw dialogs
     transfer/          Sending money to other users
     api/health/        Health check endpoint
@@ -280,6 +299,7 @@ src/
     decimal.ts         Decimal configuration for money math
     env.ts             Validated environment variables
     format.ts          Price and relative time formatting
+    lots.ts            Lot price and comparison with the market
     money.ts           Precise amount formatting
     password.ts        Password hashing (scrypt)
     transaction-types.ts  Display labels for transaction types
@@ -295,6 +315,7 @@ src/
     history.ts         Transaction history (raw SQL, keyset pagination)
     http.ts            JSON fetch with timeouts, retries and validation
     idempotency.ts     Looking up already processed requests
+    lots.ts            Marketplace: create, buy, cancel and list lots
     rates/             Rate providers, caching and refresh
     transfers.ts       Transfers between users
   proxy.ts             Optimistic redirect for protected pages
