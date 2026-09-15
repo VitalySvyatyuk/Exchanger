@@ -4,12 +4,15 @@ import { RatesTable } from "@/components/rates-table";
 import { formatAmount } from "@/lib/money";
 import { TRANSACTION_TYPE_LABELS } from "@/lib/transaction-types";
 import { getOverview } from "@/server/admin/overview";
+import { requireAdmin } from "@/server/auth";
 import { getLatestRates, refreshRates } from "@/server/rates/rates";
 import { Badge, Table, td, th } from "./ui";
 
 export const metadata: Metadata = { title: "Overview" };
 
 export default async function AdminOverviewPage() {
+  // Check access before loading anything, including the (public) rates.
+  await requireAdmin();
   const [overview, rates] = await Promise.all([
     getOverview(),
     getLatestRates(),

@@ -10,10 +10,23 @@ export const TEST_ADMIN = {
   password: "AdminPass123",
 };
 
+/**
+ * A small connection pool, like Prisma's default on a 2-core CI runner.
+ * On a developer machine the default pool is much larger and hides bugs
+ * such as a transaction waiting for a second connection.
+ */
+function withSmallPool(url: string): string {
+  const parsed = new URL(url);
+  if (!parsed.searchParams.has("connection_limit")) {
+    parsed.searchParams.set("connection_limit", "5");
+  }
+  return parsed.toString();
+}
+
 /** Variables the app needs when it runs against the test database. */
 export function testEnv(): Record<string, string> {
   return {
-    DATABASE_URL: TEST_DATABASE_URL,
+    DATABASE_URL: withSmallPool(TEST_DATABASE_URL),
     // Deterministic exchange rates, no network calls.
     RATES_MODE: "fixed",
     ADMIN_EMAIL: TEST_ADMIN.email,

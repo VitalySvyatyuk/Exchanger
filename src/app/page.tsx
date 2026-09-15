@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { after } from "next/server";
+import { after, connection } from "next/server";
 import { RatesTable } from "@/components/rates-table";
 import { buttonClassName } from "@/components/ui/button";
 import { getLatestRates, refreshRates } from "@/server/rates/rates";
@@ -23,6 +23,9 @@ const features = [
 ];
 
 export default async function Home() {
+  // Render on every request: without this, the build would try to prerender
+  // the page with rates from the database at build time.
+  await connection();
   const rates = await getLatestRates();
   // Serve cached rates now; refresh stale ones after the response is sent.
   after(() => refreshRates());

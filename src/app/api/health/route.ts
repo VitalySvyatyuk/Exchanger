@@ -1,6 +1,9 @@
+import { connection } from "next/server";
 import { db } from "@/lib/db";
 
 export async function GET() {
+  // A health check must query the database on every request, never at build time.
+  await connection();
   const startedAt = performance.now();
 
   try {

@@ -210,9 +210,17 @@ export async function createLot(
   }
 }
 
-/** Explains why a lot couldn't be bought or cancelled. */
-async function unavailableError(lotId: string, userId: string) {
-  const lot = await db.lot.findUnique({
+/**
+ * Explains why a lot couldn't be bought. Runs on the caller's transaction:
+ * asking the pool for a second connection while holding one can starve the
+ * pool when many purchases run at once.
+ */
+async function unavailableError(
+  tx: Prisma.TransactionClient,
+  lotId: string,
+  userId: string,
+) {
+  const lot = await tx.lot.findUnique({
     where: { id: lotId },
     select: { sellerId: true, status: true },
   });
@@ -256,7 +264,9 @@ export async function buyLot(
         where: { id: lotId, status: "OPEN", sellerId: { not: buyerId } },
         data: { status: "FILLED", buyerId, closedAt: new Date() },
       });
-      if (claimed.count === 0) throw await unavailableError(lotId, buyerId);
+      if (claimed.count === 0) {
+        throw await unavailableError(tx, lotId, buyerId);
+      }
 
       const lot = await tx.lot.findUniqueOrThrow({
         where: { id: lotId },
