@@ -22,7 +22,12 @@
     "db:seed": "prisma db seed",
     "db:reset": "prisma migrate reset",
     "db:studio": "prisma studio",
-    "rates:refresh": "tsx --conditions=react-server scripts/refresh-rates.ts"
+    "rates:refresh": "tsx --conditions=react-server scripts/refresh-rates.ts",
+    "test": "vitest run --project unit",
+    "test:integration": "vitest run --project integration",
+    "test:e2e": "tsx scripts/reset-test-db.ts && playwright test",
+    "test:watch": "vitest --project unit",
+    "db:test:reset": "tsx scripts/reset-test-db.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
@@ -34,6 +39,7 @@
     "zod": "^4.6.4"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
@@ -46,6 +52,8 @@
     "prisma": "^6.19.3",
     "tailwindcss": "^4",
     "tsx": "^4.23.13",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vite": "^6.4.3",
+    "vitest": "^4.1.11"
   }
 }

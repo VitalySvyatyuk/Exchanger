@@ -8,6 +8,8 @@ const envSchema = z.object({
   DATABASE_URL: z.url(),
   // Optional: CoinGecko's public API works without a key, with lower limits.
   COINGECKO_API_KEY: z.string().min(1).optional(),
+  // "fixed" serves deterministic rates without network calls (tests, offline).
+  RATES_MODE: z.enum(["live", "fixed"]).default("live"),
 });
 
 const parsed = envSchema.safeParse(process.env);

@@ -4,7 +4,7 @@ import { useActionState, useState } from "react";
 import { CurrencySelect } from "@/components/currency-select";
 import { Button } from "@/components/ui/button";
 import { marketRate, type UsdPrices } from "@/lib/conversion";
-import { Decimal } from "@/lib/decimal";
+import { Decimal, MONEY_DIGITS } from "@/lib/decimal";
 import { buyerAdvantage } from "@/lib/lots";
 import { checkAmountInput, formatAmount } from "@/lib/money";
 import type { CreateLotFormState } from "@/lib/validation/lot";
@@ -67,6 +67,7 @@ export function CreateLotForm({
     sell.valid && !sameCurrency && hasRates
       ? marketRate(sellCurrency, buyCurrency, prices)
           .times(sellAmount)
+          .toSignificantDigits(MONEY_DIGITS)
           .toDecimalPlaces(buyAccount.precision, Decimal.ROUND_HALF_UP)
           .toFixed(buyAccount.precision)
       : null;

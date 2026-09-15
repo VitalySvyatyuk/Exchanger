@@ -1,4 +1,4 @@
-import { Decimal } from "@/lib/decimal";
+import { Decimal, MONEY_DIGITS } from "@/lib/decimal";
 
 /** Fee kept by the treasury on every conversion (0.5%). */
 export const CONVERSION_FEE_RATE = "0.005";
@@ -53,6 +53,7 @@ export function quoteConversion(input: {
     rate: rate.toSignificantDigits(RATE_DIGITS).toString(),
     // Round down: the platform never credits more than the exact amount.
     toAmount: net
+      .toSignificantDigits(MONEY_DIGITS)
       .toDecimalPlaces(input.toPrecision, Decimal.ROUND_DOWN)
       .toFixed(input.toPrecision),
     fee: gross.minus(net).toSignificantDigits(RATE_DIGITS).toString(),

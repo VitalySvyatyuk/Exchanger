@@ -4,7 +4,7 @@ A multi-currency wallet and peer-to-peer exchange platform built with Next.js, T
 
 Users hold balances in several fiat currencies and cryptocurrencies. They can convert money between their own accounts, send money to other users, and trade with each other through a simple order book of fixed-price offers ("lots").
 
-> Status: work in progress. This README describes the planned scope.
+[![CI](https://github.com/VitalySvyatyuk/Exchanger/actions/workflows/ci.yml/badge.svg)](https://github.com/VitalySvyatyuk/Exchanger/actions/workflows/ci.yml)
 
 ## Features
 
@@ -222,6 +222,30 @@ Available at `/admin` to users with the `ADMIN` role (the seed creates one).
 - **Transaction log**: newest first with keyset pagination. A new index on `transactions (created_at, id)` lets PostgreSQL read one page with a backward index scan instead of sorting the whole table. Filters combine freely; the user and currency filters match transactions with a ledger entry on that user's accounts or in that currency. Each row shows its ledger entries grouped by currency and its metadata (rates used, lot, parties).
 - Read-only by design: corrections to money would be made as new, offsetting transactions, never by editing data.
 
+## Testing
+
+| Suite       | Runs against                    | What it covers                                                                                               |
+| ----------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Unit        | Nothing external                | Money math and rounding, validation, formatting, password hashing, HTTP retries, provider parsing            |
+| Integration | A real PostgreSQL test database | Ledger rules enforced by the database, registration, conversions, transfers, the marketplace, history, rates |
+| End-to-end  | A production build in Chromium  | Sign-up and login, conversion, transfers, buying and cancelling lots, admin access, mobile layout            |
+
+- **The database is part of what's tested.** Integration tests run the real migrations, so triggers, check constraints and locking behave as in production. After every test file, both reconciliation views must be empty.
+- **Concurrency is tested on purpose**: parallel conversions can't overspend a balance, two users sending each other money don't deadlock, and of several simultaneous buyers exactly one gets a lot. Temporarily removing the account-order sorting in `postTransaction` makes PostgreSQL report real deadlocks and the test fail; removing the `status = 'OPEN'` condition from a purchase makes the race test fail.
+- **Property test for money math**: conversions are compared with exact rational arithmetic on thousands of seeded random inputs. It caught a real bug: dividing by an inverted rate (1 / 0.6) left noise that made some results round down one cent too low (352.22 instead of 352.23).
+- **Deterministic rates**: tests run with `RATES_MODE=fixed`, which serves fixed rates (1 USD = 0.85 EUR, 1 BTC = 80,000 USD) through the normal refresh and storage path, without network calls.
+- **Test database safety**: `npm run db:test:reset` drops and recreates the schema of `TEST_DATABASE_URL`, and refuses to run unless the database name ends with `_test`.
+
+```bash
+npm test                      # unit tests
+npm run test:integration      # needs PostgreSQL; creates the schema in exchanger_test
+npm run build && npm run test:e2e
+```
+
+`TEST_DATABASE_URL` defaults to `postgresql://exchanger:exchanger@localhost:5432/exchanger_test`, which matches the Docker Compose database. Before the first e2e run, install a browser with `npx playwright install chromium`, or use an installed Chrome with `PLAYWRIGHT_CHANNEL=chrome`.
+
+**CI** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every push and pull request, in three parallel jobs: lint, type-check, formatting and unit tests; integration tests with a PostgreSQL 16 service; and end-to-end tests against a production build. The Playwright report is uploaded when e2e tests fail.
+
 ## Roadmap
 
 - [x] Project setup: Next.js, TypeScript, Tailwind, Prisma, Docker Compose with Postgres
@@ -232,7 +256,7 @@ Available at `/admin` to users with the `ADMIN` role (the seed creates one).
 - [x] Transfers to other users
 - [x] P2P marketplace: create, browse, buy and cancel lots
 - [x] Admin panel: users, accounts, transactions
-- [ ] Tests (unit tests and end-to-end tests) and CI
+- [x] Tests (unit, integration and end-to-end) and CI
 
 ## Getting started
 
@@ -269,20 +293,24 @@ The seed creates an admin user from `ADMIN_EMAIL` and `ADMIN_PASSWORD`. If `ADMI
 
 ### Scripts
 
-| Script                  | Description                                         |
-| ----------------------- | --------------------------------------------------- |
-| `npm run dev`           | Start the development server                        |
-| `npm run build`         | Build for production                                |
-| `npm run lint`          | Run ESLint                                          |
-| `npm run typecheck`     | Type-check with the TypeScript compiler             |
-| `npm run format`        | Format code with Prettier                           |
-| `npm run db:up`         | Start PostgreSQL with Docker Compose                |
-| `npm run db:migrate`    | Create and apply migrations (dev)                   |
-| `npm run db:deploy`     | Apply migrations (production)                       |
-| `npm run db:seed`       | Seed reference data                                 |
-| `npm run db:reset`      | Drop the dev database, re-apply migrations and seed |
-| `npm run db:studio`     | Open Prisma Studio                                  |
-| `npm run rates:refresh` | Fetch exchange rates from all providers now         |
+| Script                     | Description                                         |
+| -------------------------- | --------------------------------------------------- |
+| `npm run dev`              | Start the development server                        |
+| `npm run build`            | Build for production                                |
+| `npm run lint`             | Run ESLint                                          |
+| `npm run typecheck`        | Type-check with the TypeScript compiler             |
+| `npm run format`           | Format code with Prettier                           |
+| `npm run db:up`            | Start PostgreSQL with Docker Compose                |
+| `npm run db:migrate`       | Create and apply migrations (dev)                   |
+| `npm run db:deploy`        | Apply migrations (production)                       |
+| `npm run db:seed`          | Seed reference data                                 |
+| `npm run db:reset`         | Drop the dev database, re-apply migrations and seed |
+| `npm run db:studio`        | Open Prisma Studio                                  |
+| `npm run rates:refresh`    | Fetch exchange rates from all providers now         |
+| `npm test`                 | Run unit tests                                      |
+| `npm run test:integration` | Run integration tests against the test database     |
+| `npm run test:e2e`         | Reset the test database and run Playwright tests    |
+| `npm run db:test:reset`    | Recreate the test database schema and seed it       |
 
 ## Project structure
 
@@ -293,6 +321,9 @@ prisma/
   seed.ts              Reference data seed
 scripts/
   refresh-rates.ts     Force an exchange rate refresh
+  reset-test-db.ts     Recreate the test database
+e2e/                   Playwright end-to-end tests
+test/                  Test setup: test database, factories, environment
 src/
   app/                 Next.js App Router pages, Server Actions and route handlers
     (auth)/            Sign-up, login and logout
@@ -334,3 +365,5 @@ src/
   proxy.ts             Optimistic redirect for protected pages
   generated/prisma/    Generated Prisma client (git-ignored)
 ```
+
+Unit tests sit next to the code as `*.test.ts`, integration tests as `*.integration.test.ts`.

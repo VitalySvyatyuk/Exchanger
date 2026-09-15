@@ -22,6 +22,38 @@ export type RateProvider = {
   fetch: () => Promise<FetchedRate[]>;
 };
 
+/**
+ * Deterministic rates used when RATES_MODE=fixed, in the same orientation
+ * as the real providers publish them. 1 USD = 0.85 EUR = 0.75 GBP;
+ * 1 BTC = 80,000 USD; 1 ETH = 2,500 USD.
+ */
+export const FIXED_RATES: Record<string, FetchedRate> = {
+  EUR: {
+    baseCurrencyCode: BASE_CURRENCY,
+    quoteCurrencyCode: "EUR",
+    rate: "0.85",
+  },
+  GBP: {
+    baseCurrencyCode: BASE_CURRENCY,
+    quoteCurrencyCode: "GBP",
+    rate: "0.75",
+  },
+  BTC: {
+    baseCurrencyCode: "BTC",
+    quoteCurrencyCode: BASE_CURRENCY,
+    rate: "80000",
+  },
+  ETH: {
+    baseCurrencyCode: "ETH",
+    quoteCurrencyCode: BASE_CURRENCY,
+    rate: "2500",
+  },
+};
+
+function fixedRates(currencies: readonly string[]): FetchedRate[] {
+  return currencies.map((code) => FIXED_RATES[code]);
+}
+
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 
@@ -37,6 +69,7 @@ const frankfurter: RateProvider = {
   // Covers weekends and holidays, when the ECB doesn't publish.
   maxAgeMs: 4 * 24 * HOUR,
   async fetch() {
+    if (env.RATES_MODE === "fixed") return fixedRates(this.currencies);
     const symbols = this.currencies.join(",");
     const data = await fetchJson(
       `https://api.frankfurter.dev/v1/latest?base=${BASE_CURRENCY}&symbols=${symbols}`,
@@ -73,6 +106,7 @@ const coingecko: RateProvider = {
   refreshAfterMs: MINUTE,
   maxAgeMs: 10 * MINUTE,
   async fetch() {
+    if (env.RATES_MODE === "fixed") return fixedRates(this.currencies);
     const ids = this.currencies.map((code) => COINGECKO_IDS[code]);
     const vs = BASE_CURRENCY.toLowerCase();
     const data = await fetchJson(
